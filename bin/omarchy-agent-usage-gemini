@@ -397,6 +397,7 @@ def probe_agy_limits(force: bool = False) -> list[dict[str, Any]]:
 
     session_limit: dict[str, Any] | None = None
     weekly_limit: dict[str, Any] | None = None
+    argon_limits: list[dict[str, Any]] = []
     extra_limits: list[dict[str, Any]] = []
 
     for group in groups:
@@ -408,8 +409,24 @@ def probe_agy_limits(force: bool = False) -> list[dict[str, Any]]:
         reset = str(b.get("reset_time") or "")
         window = str(b.get("window") or "").lower()
         name = str(b.get("name") or "").lower()
+        bucket_id = str(b.get("id") or "").lower()
 
-        if "gemini" in g_name.lower():
+        # Argon has its own weekly quota, separate from the shared Gemini
+        # bucket. Its group name ("Gemini 4 Argon") also contains "gemini", so
+        # match it first or it would overwrite the main Weekly line. Shown as
+        # its own line, like Claude's "Fable Weekly".
+        if "argon" in g_name.lower() or "argon" in bucket_id or "argon" in name:
+          if window == "5h" or "5-hour" in name or "five" in name:
+            argon_title = "Argon Session"
+          else:
+            argon_title = "Argon Weekly"
+          argon_limits.append({
+            "label": argon_title,
+            "title": argon_title,
+            "percent": round(used, 4),
+            "resetsAt": reset,
+          })
+        elif "gemini" in g_name.lower():
           if window == "5h" or "5-hour" in name or "five" in name:
             session_limit = {
               "label": "Session (5-hour)",
@@ -425,7 +442,13 @@ def probe_agy_limits(force: bool = False) -> list[dict[str, Any]]:
               "resetsAt": reset,
             }
         elif used > 0.001:
-          title = f"{g_name} {window.capitalize() if window else 'Limit'}"
+          if window == "5h":
+            window_label = "Session (5-hour)"
+          elif window == "weekly":
+            window_label = "Weekly (7-day)"
+          else:
+            window_label = window.capitalize() if window else "Limit"
+          title = f"{g_name} {window_label}".strip()
           extra_limits.append({
             "label": title,
             "title": title,
@@ -437,6 +460,7 @@ def probe_agy_limits(force: bool = False) -> list[dict[str, Any]]:
       limits.append(session_limit)
     if weekly_limit:
       limits.append(weekly_limit)
+    limits.extend(argon_limits)
     limits.extend(extra_limits)
 
     write_json(cache_file, {"limits": limits, "updatedAt": dt.datetime.now(dt.timezone.utc).isoformat()})
